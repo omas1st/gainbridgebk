@@ -4,8 +4,8 @@ exports.notifyRegistration = async (req, res, next) => {
   try {
     const { name, email, phone, capital } = req.body
     await sendAdminNotification({
-      subject: `New registration — ${email}`,
-      html: `<p>New registration</p>
+      subject: `GainBridge — New registration — ${email}`,
+      html: `<p>GainBridge — New registration</p>
              <p>Name: ${name}</p>
              <p>Email: ${email}</p>
              <p>Phone: ${phone}</p>
@@ -19,8 +19,8 @@ exports.notifyLogin = async (req, res, next) => {
   try {
     const { name, email, phone, capital } = req.body
     await sendAdminNotification({
-      subject: `User login — ${email}`,
-      html: `<p>User login</p>
+      subject: `GainBridge — User login — ${email}`,
+      html: `<p>GainBridge — User login</p>
              <p>Name: ${name}</p>
              <p>Email: ${email}</p>
              <p>Phone: ${phone}</p>

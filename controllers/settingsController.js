@@ -13,11 +13,11 @@ function defaultPaymentMethods() {
       label: 'Bank transfer',
       details: {
         bankName: 'FnB',
-        accountName: 'mama pty',
+        accountName: 'Gainbridge',
         accountNumber: '62509963139',
         reference: '0657350788'
       },
-      content: `Make exact payment and use the reference.`
+      content: `Make exact payment and use the reference. Note: Transfer from Capitec Bank is not allowed`
     },
     {
       id: 'crypto-default',

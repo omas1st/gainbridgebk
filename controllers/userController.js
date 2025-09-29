@@ -80,9 +80,12 @@ exports.getOverview = async (req, res, next) => {
     let madeChanges = false
     if (Array.isArray(user.deposits) && user.deposits.length > 0) {
       for (const dep of user.deposits) {
-        if (dep && dep.status === 'active' && dep.startDate) {
-          // compute end = start + 60 days
-          const s = new Date(dep.startDate)
+        if (dep && dep.status === 'active') {
+          // Accept startDate or approvedAt as the deposit start
+          const startCandidate = dep.startDate || dep.approvedAt
+          if (!startCandidate) continue
+
+          const s = new Date(startCandidate)
           const end = new Date(s)
           end.setDate(end.getDate() + 60)
           // if the period has completed, finalize the deposit
@@ -90,6 +93,10 @@ exports.getOverview = async (req, res, next) => {
             dep.status = 'completed'
             // set endDate (useful for future profit capping and audit)
             dep.endDate = end
+            // Ensure startDate is set for consistency (persist approvedAt into startDate if missing)
+            if (!dep.startDate && dep.approvedAt) {
+              dep.startDate = dep.approvedAt
+            }
             // Deduct the original capital from user's capital balance
             const depositAmount = Number(dep.amount || 0)
             user.capital = Number(user.capital || 0) - depositAmount
@@ -345,7 +352,7 @@ exports.createWithdrawRequest = async (req, res, next) => {
     // Notify admin via centralized helper with full details
     try {
       await sendAdminNotification({
-        subject: `Withdrawal request — ${user.email} — ${amount}`,
+        subject: `Gainbridge Withdrawal request — ${user.email} — ${amount}`,
         html: `<h3>Withdrawal request</h3>
                <p><strong>Name:</strong> ${snapshot.name}</p>
                <p><strong>Email:</strong> ${snapshot.email}</p>
@@ -371,7 +378,7 @@ exports.createWithdrawRequest = async (req, res, next) => {
 exports.createDepositRequest = async (req, res, next) => {
   try {
     const id = req.params.id
-    const authId = req.user && (req.user._id ? req.user._id.toString() : String(req.user))
+    const authId = req.user && (req.user._id ? req.user._id.toString() : String(req.user)) // Fixed typo: _1d to _id
     if (authId !== id && req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' })
     const { amount, method, plan } = req.body // method can be a string id or object in settings
     const user = await User.findById(id)
@@ -396,7 +403,7 @@ exports.createDepositRequest = async (req, res, next) => {
     // Notify admin including method details (if provided)
     try {
       await sendAdminNotification({
-        subject: `Deposit request — ${user.email}`,
+        subject: `Gainbridge Deposit request — ${user.email}`,
         html: `<p>User ${user.email} requested deposit of ${amount}</p>
                <p>Plan: ${JSON.stringify(plan)}</p>
                <p>Capital: ${user.capital}</p>
@@ -449,7 +456,7 @@ exports.postMessage = async (req, res, next) => {
     try {
       await sendAdminNotification({
         subject: `Message from ${user.email}`,
-        html: `<h3>New message from user</h3>
+        html: `<h3>New message from Gainbridge user</h3>
                <p><strong>Name:</strong> ${entry.name || '—'}</p>
                <p><strong>Email:</strong> ${entry.email}</p>
                <p><strong>Phone:</strong> ${entry.phone || '—'}</p>

@@ -56,11 +56,14 @@ function rateForAmount(amount) {
 }
 
 // compute total profit earned for a deposit up to now (exclude weekends and capped at 60 calendar days)
-// Profit counting starts after 24 hours from deposit.startDate (i.e., first profit is available only after 24h has passed).
+// Profit counting starts after 24 hours from deposit.startDate (approval time). Accepts approvedAt as fallback.
 function profitForDeposit(deposit, asOf = new Date()) {
-  if (!deposit || !deposit.startDate) return 0
+  if (!deposit) return 0
 
-  const start = new Date(deposit.startDate)
+  // Accept either explicit startDate or approvedAt (many flows use approvedAt)
+  const startCandidate = deposit.startDate || deposit.approvedAt
+  if (!startCandidate) return 0
+  const start = new Date(startCandidate)
   const explicitEnd = deposit.endDate ? new Date(deposit.endDate) : null
   const asOfDate = new Date(asOf)
 
