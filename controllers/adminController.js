@@ -251,7 +251,8 @@ exports.approveWithdraw = async (req, res, next) => {
         referralEarnings: Number(updatedUser.referralEarnings || 0),
         totalPortfolio: Number(updatedUser.capital || 0) + Number(updatedUser.netProfit || 0) + Number(updatedUser.referralEarnings || 0)
       }
-      return res.json({ message: 'Withdraw approved', overview })
+      // include the updated transaction object for immediate UI update
+      return res.json({ message: 'Withdraw approved', overview, tx: txDoc })
     }
 
     // fallback
@@ -352,16 +353,19 @@ exports.approveDeposit = async (req, res, next) => {
     // days (calendar days)
     const days = Number((planRaw && Number(planRaw.days)) ? planRaw.days : (tx.details?.days ? tx.details.days : 60))
 
+    // Use approval time as start (profit accrues immediately upon approval)
     const startDate = new Date()
     const endDate = new Date(startDate)
     endDate.setDate(endDate.getDate() + days)
 
     user.deposits = user.deposits || []
+    // Add deposit subdocument — include both startDate and approvedAt so other codepaths find a canonical start immediately
     user.deposits.push({
       amount: amt,
       ratePercent: Number(ratePercent),
       days: Number(days),
       startDate,
+      approvedAt: startDate,
       endDate,
       status: 'active'
     })
@@ -378,6 +382,10 @@ exports.approveDeposit = async (req, res, next) => {
     tx.details.approvedAt = startDate
     tx.details.approvedBy = admin._id ? admin._id.toString() : (admin.id || admin._id || 'admin')
     tx.details.appliedPlan = { ratePercent: Number(ratePercent), days: Number(days), amount: amt }
+
+    // also set top-level approvedAt for convenience and canonical timestamp
+    tx.approvedAt = startDate
+
     // ensure main method field is a string id (if not present, leave as undefined)
     if (tx.details && tx.details.method && typeof tx.details.method === 'object') {
       tx.method = tx.method || (tx.details.method.id ? String(tx.details.method.id) : (tx.details.method.type ? String(tx.details.method.type) : tx.method))
@@ -407,7 +415,17 @@ exports.approveDeposit = async (req, res, next) => {
     }
 
     if (referrer) {
-      const referralRate = Number(process.env.REFERRAL_RATE || 0.05) // default 5% if not set
+      // Read environment REFERRAL_RATE and parse to a number. Accepts '0.05' (5%) or '.05' etc.
+      // Default to 0.05 (5%) if not set or invalid.
+      const envVal = process.env.REFERRAL_RATE
+      let referralRate = 0.05
+      if (typeof envVal === 'string' && envVal.trim() !== '') {
+        const parsed = parseFloat(envVal)
+        if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) referralRate = parsed
+      } else if (typeof envVal === 'number' && !Number.isNaN(envVal)) {
+        referralRate = envVal
+      }
+
       const commission = Number((amt * referralRate).toFixed(2))
 
       referrer.referralEarnings = Number((referrer.referralEarnings || 0) + commission)
@@ -443,7 +461,8 @@ exports.approveDeposit = async (req, res, next) => {
 
     // notify user + admin
     try {
-      await sendMail({ to: user.email, subject: `Deposit approved — ${amt}`, html: `<p>Your deposit of ${amt} has been approved and added to your capital.</p><p>Profit starts accruing 24 hours after approval and compounds on weekdays only.</p>` })
+      // Note: updated message to reflect immediate accrual (no 24-hour delay)
+      await sendMail({ to: user.email, subject: `Deposit approved — ${amt}`, html: `<p>Your deposit of ${amt} has been approved and added to your capital.</p><p>Profit starts accruing immediately after approval and accrues on business days (weekdays) only.</p>` })
     } catch (err) { console.warn('notify user deposit err', err.message || err) }
 
     try {
@@ -453,7 +472,8 @@ exports.approveDeposit = async (req, res, next) => {
       })
     } catch (err) { console.warn('admin notify (approve deposit) failed', err.message || err) }
 
-    res.json({ message: 'Deposit approved', user })
+    // Return the updated user and transaction so frontend can update the UI immediately (includes approvedAt)
+    return res.json({ message: 'Deposit approved', user, tx })
   } catch (err) { next(err) }
 }
 
