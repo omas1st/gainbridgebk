@@ -1,4 +1,3 @@
-// controllers/userController.js
 const Transaction = require('../models/Transaction')
 const User = require('../models/User')
 const Audit = require('../models/Audit')
@@ -321,7 +320,22 @@ exports.createWithdrawRequest = async (req, res, next) => {
 
     const available = Number(user.netProfit || 0) + Number(user.referralEarnings || 0)
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' })
+
+    // Enforce minimum withdrawal amount of $2
+    if (Number(amount) < 2) return res.status(400).json({ message: 'Minimum withdrawal is $2' })
+
     if (amount > available) return res.status(400).json({ message: 'Amount exceeds available withdrawal balance' })
+
+    // validate required method-specific details
+    if (method === 'bank') {
+      if (!bank || !bank.accountNumber || String(bank.accountNumber).trim() === '') {
+        return res.status(400).json({ message: 'Account number is required for bank transfers' })
+      }
+    } else if (method === 'crypto') {
+      if (!crypto || !crypto.walletAddress || String(crypto.walletAddress).trim() === '') {
+        return res.status(400).json({ message: 'Wallet address is required for cryptocurrency withdrawals' })
+      }
+    }
 
     // build transaction details and snapshot of user balances
     const snapshot = {
