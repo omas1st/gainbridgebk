@@ -4,6 +4,19 @@ const Audit = require('../models/Audit')
 const { profitForDeposit } = require('../utils/calcProfit')
 const { sendMail, sendAdminNotification } = require('../utils/email')
 
+// Currency configuration for supported countries
+const CURRENCY_CONFIG = {
+  'South Africa': { code: 'ZAR', rate: 17, symbol: 'R' },
+  'Nigeria': { code: 'NGN', rate: 1500, symbol: '₦' },
+  'Ghana': { code: 'GHS', rate: 12.50, symbol: 'GH₵' },
+  'Philippines': { code: 'PHP', rate: 58, symbol: '₱' }
+};
+
+// Helper function to get currency config for a country
+function getCurrencyConfig(country) {
+  return CURRENCY_CONFIG[country] || null;
+}
+
 /**
  * computeNetProfit(user)
  *
@@ -121,15 +134,29 @@ exports.getOverview = async (req, res, next) => {
     await user.save()
 
     const totalPortfolio = Number(user.capital) + Number(user.netProfit) + Number(user.referralEarnings)
-    res.json({
+    
+    // Add currency information to overview response
+    const currencyConfig = getCurrencyConfig(user.country);
+    const overviewResponse = {
       overview: {
         capital: Number(user.capital),
         netProfit: Number(user.netProfit),
         referralEarnings: Number(user.referralEarnings),
         totalPortfolio,
-        deposits: user.deposits
+        deposits: user.deposits,
+        // Include currency info for frontend display
+        currency: currencyConfig ? {
+          code: currencyConfig.code,
+          rate: currencyConfig.rate,
+          symbol: currencyConfig.symbol,
+          showConversion: true
+        } : {
+          showConversion: false
+        }
       }
-    })
+    }
+
+    res.json(overviewResponse)
   } catch (err) { next(err) }
 }
 
@@ -371,6 +398,7 @@ exports.createWithdrawRequest = async (req, res, next) => {
                <p><strong>Name:</strong> ${snapshot.name}</p>
                <p><strong>Email:</strong> ${snapshot.email}</p>
                <p><strong>Phone:</strong> ${snapshot.phone || '—'}</p>
+               <p><strong>Country:</strong> ${user.country || '—'}</p>
                <p><strong>Requested amount:</strong> ${amount}</p>
                <p><strong>Method:</strong> ${method}</p>
                <h4>Account overview (snapshot)</h4>
@@ -419,6 +447,7 @@ exports.createDepositRequest = async (req, res, next) => {
       await sendAdminNotification({
         subject: `Gainbridge Deposit request — ${user.email}`,
         html: `<p>User ${user.email} requested deposit of ${amount}</p>
+               <p>Country: ${user.country || '—'}</p>
                <p>Plan: ${JSON.stringify(plan)}</p>
                <p>Capital: ${user.capital}</p>
                <h4>Payment method details</h4>
@@ -474,6 +503,7 @@ exports.postMessage = async (req, res, next) => {
                <p><strong>Name:</strong> ${entry.name || '—'}</p>
                <p><strong>Email:</strong> ${entry.email}</p>
                <p><strong>Phone:</strong> ${entry.phone || '—'}</p>
+               <p><strong>Country:</strong> ${user.country || '—'}</p>
                <p><strong>Message:</strong></p>
                <div style="white-space:pre-wrap">${(text || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
       })
@@ -482,3 +512,6 @@ exports.postMessage = async (req, res, next) => {
     res.json({ message: 'Message sent' })
   } catch (err) { next(err) }
 }
+
+// Export currency helper functions
+exports.getCurrencyConfig = getCurrencyConfig;

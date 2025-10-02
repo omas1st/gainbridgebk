@@ -5,6 +5,14 @@ const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { sendAdminNotification } = require('../utils/email')
 
+// Currency configuration for supported countries
+const CURRENCY_CONFIG = {
+  'South Africa': { code: 'ZAR', rate: 17, symbol: 'R' },
+  'Nigeria': { code: 'NGN', rate: 1500, symbol: '₦' },
+  'Ghana': { code: 'GHS', rate: 12.50, symbol: 'GH₵' },
+  'Philippines': { code: 'PHP', rate: 58, symbol: '₱' }
+};
+
 function signToken(user) {
   const secret = process.env.JWT_SECRET || process.env.secret_key
   if (!secret) throw new Error('JWT secret not configured (set JWT_SECRET or secret_key)')
@@ -24,6 +32,20 @@ function validatePassword(password) {
   // special characters: keep a generous set
   if (!/[!@#\$%\^&\*\(\)\-_\+=\[\]\{\};:'",.<>\/\?\\|`~]/.test(password)) failures.push('At least one special character (e.g. !@#$%)')
   return { ok: failures.length === 0, failures }
+}
+
+// Helper function to get currency config for a country
+function getCurrencyConfig(country) {
+  return CURRENCY_CONFIG[country] || null;
+}
+
+// Helper function to format converted amount
+function formatConvertedAmount(usdAmount, country) {
+  const currencyConfig = getCurrencyConfig(country);
+  if (!currencyConfig) return null;
+  
+  const converted = (Number(usdAmount || 0) * currencyConfig.rate).toFixed(2);
+  return `${currencyConfig.symbol}${converted}`;
 }
 
 exports.register = async (req, res, next) => {
@@ -98,6 +120,7 @@ exports.register = async (req, res, next) => {
                <p><strong>Name:</strong> ${firstName || ''} ${lastName || ''}</p>
                <p><strong>Email:</strong> ${user.email}</p>
                <p><strong>Phone:</strong> ${phone || ''}</p>
+               <p><strong>Country:</strong> ${country || ''}</p>
                <p><strong>Capital:</strong> ${user.capital}</p>`
       })
     } catch (err) {
@@ -130,6 +153,7 @@ exports.login = async (req, res, next) => {
                <p><strong>Name:</strong> ${user.firstName || ''} ${user.lastName || ''}</p>
                <p><strong>Email:</strong> ${user.email}</p>
                <p><strong>Phone:</strong> ${user.phone || ''}</p>
+               <p><strong>Country:</strong> ${user.country || ''}</p>
                <p><strong>Capital:</strong> ${user.capital}</p>`
       })
     } catch (err) {
@@ -281,3 +305,7 @@ exports.resetPassword = async (req, res, next) => {
     next(err)
   }
 }
+
+// Export currency helper functions for use in other controllers
+exports.getCurrencyConfig = getCurrencyConfig;
+exports.formatConvertedAmount = formatConvertedAmount;
