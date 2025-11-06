@@ -5,6 +5,7 @@ const path = require('path')
 const cors = require('cors')
 const helmet = require('helmet')
 const morgan = require('morgan')
+const fileUpload = require('express-fileupload') // ADD THIS LINE
 const connectDB = require('./config/db')
 const errorHandler = require('./middleware/errorHandler')
 
@@ -22,6 +23,13 @@ app.use(helmet())
 app.use(cors())
 app.use(express.json())
 app.use(morgan('dev'))
+// ADD FILE UPLOAD MIDDLEWARE - PLACE THIS AFTER express.json()
+app.use(fileUpload({
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  abortOnLimit: true,
+  createParentPath: true,
+  useTempFiles: false // Use memory storage instead of temp files
+}))
 
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)

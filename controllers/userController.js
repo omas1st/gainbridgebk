@@ -422,10 +422,11 @@ exports.createDepositRequest = async (req, res, next) => {
     const id = req.params.id
     const authId = req.user && (req.user._id ? req.user._id.toString() : String(req.user)) // Fixed typo: _1d to _id
     if (authId !== id && req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' })
-    const { amount, method, plan } = req.body // method can be a string id or object in settings
+    const { amount, method, plan, receiptUrl } = req.body // method can be a string id or object in settings
     const user = await User.findById(id)
     if (!user) return res.status(404).json({ message: 'User not found' })
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' })
+    if (!receiptUrl) return res.status(400).json({ message: 'Payment receipt is required' })
 
     // Normalize method: accept either method id string or object - store the method id on tx.method to match schema,
     // but keep the full method details in details.method so admins can see it.
@@ -437,12 +438,16 @@ exports.createDepositRequest = async (req, res, next) => {
       type: 'deposit',
       amount,
       method: methodId, // store compact id in main field to avoid casting errors
-      details: { plan: plan || null, method: methodDetails },
+      details: { 
+        plan: plan || null, 
+        method: methodDetails,
+        receiptUrl: receiptUrl // Store receipt URL in transaction details
+      },
       status: 'pending'
     })
     await tx.save()
 
-    // Notify admin including method details (if provided)
+    // Notify admin including method details and receipt URL
     try {
       await sendAdminNotification({
         subject: `Gainbridge Deposit request — ${user.email}`,
@@ -452,6 +457,8 @@ exports.createDepositRequest = async (req, res, next) => {
                <p>Capital: ${user.capital}</p>
                <h4>Payment method details</h4>
                <pre>${JSON.stringify(methodDetails || { id: methodId }, null, 2)}</pre>
+               <h4>Payment Receipt</h4>
+               <p><a href="${receiptUrl}" target="_blank">View Payment Receipt</a></p>
                <p>Transaction id: ${tx._id}</p>`
       })
     } catch (err) { console.warn('notify admin deposit err', err.message || err) }
