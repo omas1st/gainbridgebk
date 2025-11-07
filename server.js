@@ -5,7 +5,7 @@ const path = require('path')
 const cors = require('cors')
 const helmet = require('helmet')
 const morgan = require('morgan')
-const fileUpload = require('express-fileupload') // ADD THIS LINE
+const fileUpload = require('express-fileupload')
 const connectDB = require('./config/db')
 const errorHandler = require('./middleware/errorHandler')
 
@@ -21,14 +21,19 @@ connectDB()
 
 app.use(helmet())
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(morgan('dev'))
-// ADD FILE UPLOAD MIDDLEWARE - PLACE THIS AFTER express.json()
+
+// Vercel-compatible file upload configuration
 app.use(fileUpload({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   abortOnLimit: true,
-  createParentPath: true,
-  useTempFiles: false // Use memory storage instead of temp files
+  createParentPath: false, // Changed to false for Vercel compatibility
+  useTempFiles: false, // Use memory storage for Vercel
+  tempFileDir: '/tmp', // Vercel provides /tmp directory
+  safeFileNames: true,
+  preserveExtension: true
 }))
 
 app.use('/api/auth', authRoutes)
@@ -42,6 +47,15 @@ app.get('/', (req, res) => res.send('GainBridge API — running. Visit /api for 
 app.get('/api', (req, res) => res.json({
   message: 'GainBridge API root. Available routes: /api/auth, /api/users, /api/admin, /api/notify, /api/public, /api/settings'
 }))
+
+// Health check endpoint for Vercel
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  })
+})
 
 const clientBuildPath = path.join(__dirname, '..', 'client', 'build')
 if (process.env.NODE_ENV === 'production') {

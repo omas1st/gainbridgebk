@@ -14,13 +14,13 @@ exports.uploadReceipt = async (req, res, next) => {
   try {
     // Check if Cloudinary is configured
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      console.error('Cloudinary configuration missing');
       return res.status(500).json({ 
-        message: 'Cloudinary configuration missing. Please contact support.' 
+        message: 'File upload service temporarily unavailable. Please try again later.' 
       });
     }
 
-    console.log('Upload receipt request received, files:', req.files);
-    console.log('User making request:', req.user._id);
+    console.log('Upload receipt request received');
     
     if (!req.files || !req.files.receipt) {
       return res.status(400).json({ message: 'No receipt file uploaded' });
@@ -49,7 +49,7 @@ exports.uploadReceipt = async (req, res, next) => {
 
     console.log('Uploading to Cloudinary:', fileName);
 
-    // Upload to Cloudinary
+    // Upload to Cloudinary - use buffer for Vercel compatibility
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -66,14 +66,19 @@ exports.uploadReceipt = async (req, res, next) => {
             console.error('Cloudinary upload error:', error);
             reject(error);
           } else {
-            console.log('Cloudinary upload success:', result.secure_url);
+            console.log('Cloudinary upload success');
             resolve(result);
           }
         }
       );
 
-      // Use the file buffer
-      uploadStream.end(receiptFile.data);
+      // Use buffer for Vercel compatibility
+      if (receiptFile.data) {
+        uploadStream.end(receiptFile.data);
+      } else {
+        // Fallback for different file structures
+        uploadStream.end(receiptFile);
+      }
     });
 
     res.json({ 
@@ -85,6 +90,7 @@ exports.uploadReceipt = async (req, res, next) => {
   } catch (err) {
     console.error('Receipt upload error:', err);
     
+    // User-friendly error messages
     if (err.message && err.message.includes('File size too large')) {
       return res.status(400).json({ 
         message: 'File size too large. Maximum size is 5MB.' 
@@ -93,12 +99,12 @@ exports.uploadReceipt = async (req, res, next) => {
     
     if (err.message && err.message.includes('Upload preset')) {
       return res.status(500).json({ 
-        message: 'Cloudinary configuration error. Please contact support.' 
+        message: 'File upload service temporarily unavailable. Please try again later.' 
       });
     }
     
     res.status(500).json({ 
-      message: 'Failed to upload receipt. Please try again.' 
+      message: 'Failed to upload receipt. Please try again later.' 
     });
   }
 };
