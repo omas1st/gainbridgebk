@@ -1,6 +1,6 @@
 // controllers/uploadController.js
 const cloudinary = require('cloudinary').v2;
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto'); // Use built-in crypto module instead of uuid
 
 // Configure Cloudinary with environment variables ONLY
 cloudinary.config({
@@ -8,6 +8,11 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
+
+// Generate unique ID using crypto (built-in module)
+function generateUniqueId() {
+  return crypto.randomBytes(16).toString('hex');
+}
 
 // Upload payment receipt
 exports.uploadReceipt = async (req, res, next) => {
@@ -43,9 +48,10 @@ exports.uploadReceipt = async (req, res, next) => {
       });
     }
 
-    // Generate unique filename with user reference
+    // Generate unique filename with user reference using crypto
     const userId = req.user._id;
-    const fileName = `receipt_${userId}_${uuidv4()}`;
+    const uniqueId = generateUniqueId();
+    const fileName = `receipt_${userId}_${uniqueId}`;
 
     console.log('Uploading to Cloudinary:', fileName);
 
