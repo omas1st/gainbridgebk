@@ -1,5 +1,6 @@
 const Transaction = require('../models/Transaction')
 const User = require('../models/User')
+const AdminSettings = require('../models/AdminSettings') // Add this import
 const Audit = require('../models/Audit')
 const { profitForDeposit } = require('../utils/calcProfit')
 const { sendMail, sendAdminNotification } = require('../utils/email')
@@ -15,6 +16,75 @@ const CURRENCY_CONFIG = {
 // Helper function to get currency config for a country
 function getCurrencyConfig(country) {
   return CURRENCY_CONFIG[country] || null;
+}
+
+// Helper function to check if withdrawal is allowed based on schedule
+async function isWithdrawalAllowed() {
+  try {
+    const settings = await AdminSettings.getSettings()
+    const today = new Date()
+    const dayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    
+    if (settings.withdrawalScheduleType === 'daysOfWeek') {
+      return settings.withdrawalDaysOfWeek.includes(dayOfWeek)
+    } else if (settings.withdrawalScheduleType === 'interval') {
+      // Calculate days since epoch and check if it's divisible by interval
+      const epochDay = Math.floor(today.getTime() / (1000 * 60 * 60 * 24))
+      return epochDay % settings.withdrawalIntervalDays === 0
+    }
+    
+    return true // Default to allowed if no schedule set
+  } catch (error) {
+    console.error('Error checking withdrawal schedule:', error)
+    return true // Default to allowed on error
+  }
+}
+
+// Helper function to get next withdrawal date information
+async function getNextWithdrawalInfo() {
+  try {
+    const settings = await AdminSettings.getSettings()
+    const today = new Date()
+    
+    if (settings.withdrawalScheduleType === 'daysOfWeek') {
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+      const nextWithdrawalDays = settings.withdrawalDaysOfWeek
+        .map(day => {
+          const daysUntil = (day - today.getDay() + 7) % 7
+          return daysUntil === 0 ? 7 : daysUntil // If today is a withdrawal day, show next week
+        })
+        .sort((a, b) => a - b)
+      
+      const nextDay = nextWithdrawalDays[0] || 7
+      const nextDate = new Date(today)
+      nextDate.setDate(today.getDate() + nextDay)
+      
+      return {
+        allowedToday: settings.withdrawalDaysOfWeek.includes(today.getDay()),
+        nextWithdrawalDate: nextDate,
+        nextWithdrawalDay: dayNames[nextDate.getDay()],
+        scheduleType: 'daysOfWeek',
+        withdrawalDays: settings.withdrawalDaysOfWeek.map(day => dayNames[day])
+      }
+    } else if (settings.withdrawalScheduleType === 'interval') {
+      const epochDay = Math.floor(today.getTime() / (1000 * 60 * 60 * 24))
+      const daysUntilNext = settings.withdrawalIntervalDays - (epochDay % settings.withdrawalIntervalDays)
+      const nextDate = new Date(today)
+      nextDate.setDate(today.getDate() + daysUntilNext)
+      
+      return {
+        allowedToday: epochDay % settings.withdrawalIntervalDays === 0,
+        nextWithdrawalDate: nextDate,
+        intervalDays: settings.withdrawalIntervalDays,
+        scheduleType: 'interval'
+      }
+    }
+    
+    return { allowedToday: true }
+  } catch (error) {
+    console.error('Error getting next withdrawal info:', error)
+    return { allowedToday: true }
+  }
 }
 
 /**
@@ -135,6 +205,9 @@ exports.getOverview = async (req, res, next) => {
 
     const totalPortfolio = Number(user.capital) + Number(user.netProfit) + Number(user.referralEarnings)
     
+    // Get withdrawal restriction info and schedule info
+    const withdrawalInfo = await getNextWithdrawalInfo()
+    
     // Add currency information to overview response
     const currencyConfig = getCurrencyConfig(user.country);
     const overviewResponse = {
@@ -152,7 +225,12 @@ exports.getOverview = async (req, res, next) => {
           showConversion: true
         } : {
           showConversion: false
-        }
+        },
+        // Include withdrawal restriction info
+        withdrawalRestricted: user.withdrawalRestricted,
+        withdrawalRestrictionReason: user.withdrawalRestrictionReason,
+        // Include withdrawal schedule info
+        withdrawalSchedule: withdrawalInfo
       }
     }
 
@@ -339,6 +417,30 @@ exports.createWithdrawRequest = async (req, res, next) => {
     const { method, amount, bank, crypto } = req.body
     const user = await User.findById(id)
     if (!user) return res.status(404).json({ message: 'User not found' })
+
+    // Check if user is restricted from withdrawal
+    if (user.withdrawalRestricted) {
+      return res.status(400).json({ 
+        message: `Withdrawal is restricted. Reason: ${user.withdrawalRestrictionReason || 'Contact support for more information.'}` 
+      })
+    }
+
+    // Check withdrawal schedule
+    const withdrawalAllowed = await isWithdrawalAllowed()
+    if (!withdrawalAllowed) {
+      const withdrawalInfo = await getNextWithdrawalInfo()
+      let errorMessage = 'Withdrawals are not allowed today. '
+      
+      if (withdrawalInfo.scheduleType === 'daysOfWeek') {
+        errorMessage += `Next withdrawal day: ${withdrawalInfo.nextWithdrawalDay}`
+      } else if (withdrawalInfo.scheduleType === 'interval') {
+        errorMessage += `Next withdrawal in ${withdrawalInfo.intervalDays - (Math.floor(new Date().getTime() / (1000 * 60 * 60 * 24)) % withdrawalInfo.intervalDays)} days`
+      } else {
+        errorMessage += 'Please check back later.'
+      }
+      
+      return res.status(400).json({ message: errorMessage })
+    }
 
     // Recalculate netProfit to ensure available is up-to-date
     const calcProfit = await computeNetProfit(user)

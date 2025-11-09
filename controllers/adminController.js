@@ -2,6 +2,7 @@
 const mongoose = require('mongoose')
 const Transaction = require('../models/Transaction')
 const User = require('../models/User')
+const AdminSettings = require('../models/AdminSettings') // Add this import
 const Audit = require('../models/Audit')
 const { sendMail, sendAdminNotification } = require('../utils/email')
 const { rateForAmount } = require('../utils/calcProfit') // used to infer rate when plan not provided
@@ -32,6 +33,95 @@ async function deductFromUser(user, amount, session = null) {
   }
 
   return { netAfter: user.netProfit, refAfter: user.referralEarnings, shortfall: Number(remaining.toFixed(2)) }
+}
+
+// New function: Bulk update user withdrawal restrictions
+exports.bulkUpdateWithdrawalRestriction = async (req, res, next) => {
+  try {
+    const { userIds, restricted, reason } = req.body
+    const admin = req.user
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ message: 'No users selected' })
+    }
+
+    const updateResult = await User.updateMany(
+      { _id: { $in: userIds } },
+      { 
+        withdrawalRestricted: restricted,
+        withdrawalRestrictionReason: restricted ? (reason || 'Withdrawal restricted by admin') : ''
+      }
+    )
+
+    await Audit.create({ 
+      admin: admin._id, 
+      action: 'bulk-update-withdrawal-restriction', 
+      meta: { 
+        userIds, 
+        restricted, 
+        reason: restricted ? reason : '',
+        affectedCount: updateResult.modifiedCount
+      } 
+    })
+
+    res.json({ 
+      message: `Successfully ${restricted ? 'restricted' : 'enabled'} withdrawal for ${updateResult.modifiedCount} users`,
+      affectedCount: updateResult.modifiedCount
+    })
+  } catch (err) { next(err) }
+}
+
+// New function: Update withdrawal schedule settings
+exports.updateWithdrawalSettings = async (req, res, next) => {
+  try {
+    const { scheduleType, daysOfWeek, intervalDays } = req.body
+    const admin = req.user
+
+    const settings = await AdminSettings.getSettings()
+    
+    if (scheduleType === 'daysOfWeek') {
+      settings.withdrawalScheduleType = 'daysOfWeek'
+      settings.withdrawalDaysOfWeek = daysOfWeek || [1, 3, 5] // Default to Mon, Wed, Fri
+      settings.withdrawalIntervalDays = 1
+    } else if (scheduleType === 'interval') {
+      settings.withdrawalScheduleType = 'interval'
+      settings.withdrawalIntervalDays = Math.max(1, parseInt(intervalDays) || 1)
+      settings.withdrawalDaysOfWeek = []
+    }
+
+    settings.lastUpdated = new Date()
+    settings.updatedBy = admin._id
+
+    await settings.save()
+
+    await Audit.create({ 
+      admin: admin._id, 
+      action: 'update-withdrawal-settings', 
+      meta: { 
+        scheduleType: settings.withdrawalScheduleType,
+        daysOfWeek: settings.withdrawalDaysOfWeek,
+        intervalDays: settings.withdrawalIntervalDays
+      } 
+    })
+
+    res.json({ 
+      message: 'Withdrawal settings updated successfully',
+      settings: {
+        withdrawalScheduleType: settings.withdrawalScheduleType,
+        withdrawalDaysOfWeek: settings.withdrawalDaysOfWeek,
+        withdrawalIntervalDays: settings.withdrawalIntervalDays,
+        lastUpdated: settings.lastUpdated
+      }
+    })
+  } catch (err) { next(err) }
+}
+
+// New function: Get withdrawal settings
+exports.getWithdrawalSettings = async (req, res, next) => {
+  try {
+    const settings = await AdminSettings.getSettings()
+    res.json({ settings })
+  } catch (err) { next(err) }
 }
 
 /* ======= Requests listing / approve / reject (deposit & withdraw) ======= */
@@ -517,7 +607,8 @@ exports.rejectDeposit = async (req, res, next) => {
  * listUsers - admin listing with filters & pagination
  * Query params supported:
  *  q (name or email), profile (profileType OR role), registeredFrom, registeredTo,
- *  minCapital, maxCapital, lastLoginFrom, lastLoginTo, page, perPage
+ *  minCapital, maxCapital, lastLoginFrom, lastLoginTo, page, perPage,
+ *  minReferrals, maxReferrals, withdrawalRestricted (NEW FILTERS)
  *
  * Note: excludes users with deleted: true
  */
@@ -531,6 +622,9 @@ exports.listUsers = async (req, res, next) => {
     const maxCapital = req.query.maxCapital
     const lastLoginFrom = req.query.lastLoginFrom
     const lastLoginTo = req.query.lastLoginTo
+    const minReferrals = req.query.minReferrals // NEW
+    const maxReferrals = req.query.maxReferrals // NEW
+    const withdrawalRestricted = req.query.withdrawalRestricted // NEW
     const page = Math.max(1, parseInt(req.query.page || '1', 10))
     const perPage = Math.max(1, Math.min(200, parseInt(req.query.perPage || '30', 10)))
 
@@ -575,17 +669,48 @@ exports.listUsers = async (req, res, next) => {
       }
     }
 
+    // NEW: Filter by withdrawal restriction status
+    if (withdrawalRestricted !== undefined) {
+      if (withdrawalRestricted === 'true' || withdrawalRestricted === true) {
+        match.withdrawalRestricted = true
+      } else if (withdrawalRestricted === 'false' || withdrawalRestricted === false) {
+        match.withdrawalRestricted = false
+      }
+    }
+
+    // NEW: Filter by referral count range
+    if (minReferrals || maxReferrals) {
+      // We'll handle this after the initial query since referral count is computed
+    }
+
     // cleanup empty filter objects
     Object.keys(match).forEach(k => {
       if (match[k] && typeof match[k] === 'object' && Object.keys(match[k]).length === 0) delete match[k]
     })
 
-    const total = await User.countDocuments(match)
-    const users = await User.find(match)
+    let users = await User.find(match)
       .select('-password')
       .sort({ createdAt: -1 })
       .skip((page - 1) * perPage)
       .limit(perPage)
+      .lean()
+
+    // NEW: Filter by referral count if needed
+    if (minReferrals || maxReferrals) {
+      users = users.filter(user => {
+        const referralCount = user.referrals ? user.referrals.length : 0
+        if (minReferrals && referralCount < Number(minReferrals)) return false
+        if (maxReferrals && referralCount > Number(maxReferrals)) return false
+        return true
+      })
+    }
+
+    const total = minReferrals || maxReferrals ? users.length : await User.countDocuments(match)
+
+    // If we filtered by referral count, we need to adjust pagination
+    if (minReferrals || maxReferrals) {
+      users = users.slice((page - 1) * perPage, page * perPage)
+    }
 
     res.json({ users, total, page, perPage })
   } catch (err) { next(err) }
@@ -680,7 +805,7 @@ exports.getUserTransactions = async (req, res, next) => {
 exports.updateUser = async (req, res, next) => {
   try {
     const id = req.params.id
-    const allowed = ['firstName','lastName','phone','country','profileType','role','capital','netProfit','referralEarnings','email','referrals','deleted']
+    const allowed = ['firstName','lastName','phone','country','profileType','role','capital','netProfit','referralEarnings','email','referrals','deleted','withdrawalRestricted','withdrawalRestrictionReason']
     const updates = {}
     for (const k of allowed) {
       if (typeof req.body[k] !== 'undefined') updates[k] = req.body[k]

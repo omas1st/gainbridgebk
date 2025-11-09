@@ -13,6 +13,11 @@ router.use(protect, isAdmin)
 router.get('/settings', settingsController.getAdminSettings)
 router.put('/settings', settingsController.updateAdminSettings)
 
+// Withdrawal management endpoints (NEW)
+router.patch('/users/bulk-withdrawal-restriction', adminController.bulkUpdateWithdrawalRestriction)
+router.get('/withdrawal-settings', adminController.getWithdrawalSettings)
+router.put('/withdrawal-settings', adminController.updateWithdrawalSettings)
+
 router.get('/withdraws', adminController.listWithdraws) // ?status=pending
 router.get('/deposits', adminController.listDeposits)
 

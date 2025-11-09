@@ -61,7 +61,12 @@ const UserSchema = new Schema({
   // --- Reset password support fields (added) ---
   // store a hash of the reset token (so we never persist raw token) and expiry timestamp
   resetPasswordTokenHash: { type: String, default: null },
-  resetPasswordExpires: { type: Date, default: null }
+  resetPasswordExpires: { type: Date, default: null },
+
+  // --- Withdrawal Restriction Fields ---
+  withdrawalRestricted: { type: Boolean, default: false },
+  withdrawalRestrictionReason: { type: String, default: '' }
+
 })
 
 // ensure deposits array is always an array on read/write
