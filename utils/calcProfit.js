@@ -63,16 +63,16 @@ function businessMinutesBetween(startDate, endDate) {
 // 2% -> 5%, 2.5% -> 6%, 3% -> 7%, 4% -> 8%
 function rateForAmount(amount) {
   const mapping = [
-    { amount: 20, rate: 5 },
-    { amount: 50, rate: 5 },
-    { amount: 100, rate: 6 },
-    { amount: 200, rate: 6 },
-    { amount: 500, rate: 6 },
-    { amount: 1000, rate: 7 },
-    { amount: 2000, rate: 7 },
-    { amount: 5000, rate: 7 },
-    { amount: 10000, rate: 8 },
-    { amount: 20000, rate: 8 }
+    { amount: 20, rate: 4 },
+    { amount: 50, rate: 4 },
+    { amount: 100, rate: 4.5 },
+    { amount: 200, rate: 4.5 },
+    { amount: 500, rate: 5 },
+    { amount: 1000, rate: 6 },
+    { amount: 2000, rate: 6 },
+    { amount: 5000, rate: 6 },
+    { amount: 10000, rate: 7 },
+    { amount: 20000, rate: 7 }
   ]
 
   const exact = mapping.find(m => Number(m.amount) === Number(amount))
